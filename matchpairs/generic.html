@@ -1,0 +1,319 @@
+<head>
+<style>
+table {
+    border-style:groove;
+    border-width:thin;
+}
+th {
+    text-align:center;
+    font-size:20px;
+}
+td {
+    text-align:center;
+}
+.hoverAnswer {
+    background-color:#EEEEEE;
+    cursor:pointer;
+}
+</style>
+<script src="pair_groups.js" ></script>
+<script>
+// Start Customizable data //
+// if the clue has more than one media, use an object : { text:"twinkle", image:"moon.jpg", sound:"ojas twinkle.mp3" }
+// currently, an answer can only be one of text/image
+var arrClues;
+var arrAnswers;
+var numAnswerColumns = 5;
+var correctAnswerSound = "barobbar.mp3";
+var correctAnswerImage = "signal_green.jpg";
+var wrongAnswerSound = "nono.mp3";
+var wrongAnswerImage = "signal_red.jpg";
+var answerTextFont = 25;
+var timesPlayed = 0;
+var timesCorrect = 0;
+var clueWidth = 300; //pixels.
+var separatorWidth = 100; // betw clue and answers
+var answersWidth; // derived from above
+var answerAction;
+
+// End Customizable data //
+
+var currCluePos = -1;
+
+function fInit(){
+    fPopulatePairGroupNames();
+    fOnPairGroupChange(0);
+    fCreateSoundElem( "response_sounds_div", "soundobjcorrect", correctAnswerSound, false );
+    fCreateSoundElem( "response_sounds_div", "soundobjwrong", wrongAnswerSound, false );
+}
+
+function fPopulatePairGroupNames() {
+    var fSel = document.getElementById( "sel_pair_groups" );
+    for( var i=0; i< arrPairGroups.length; i++ ){
+    var grp = arrPairGroups[i];
+        fSel.add( new Option( grp.name, grp.name) );
+    }
+}
+
+
+
+function fOnPairGroupChange( selIndex) {
+    var pairGroup = arrPairGroups[ selIndex];
+    answerAction = pairGroup.answerAction;
+    arrClues = pairGroup.arrClues;
+    arrAnswers = pairGroup.arrAnswers;
+    numAnswerColumns = pairGroup.numAnswerColumns;
+    document.getElementById( "div_group_info").innerHTML = pairGroup.info;
+    fInitArrays();
+    fCalcWidths(); 
+    fCreatelayout();
+}
+
+
+// Check and setup the arrays
+function fInitArrays(){
+    if( arrClues != null && arrAnswers != null ){
+        if( arrClues.length != arrAnswers.length ){
+            alert( "The number of Clues (" + arrClues.length + ") and Answers (" + arrAnswers.length + ") do not match" );
+        }
+    }
+    else {
+        alert( "Please define the Clue and Answers" );
+    }
+    // Loop thru the clues and save the original index for shuffling.
+    // We need to create an object to assign the new property to, since a string is immutable
+    for( var i=0; i< arrClues.length; i++ ){
+        var clueObj = arrClues[i];
+        if ( typeof clueObj == "string" ){
+            var clueStr = clueObj;
+            var clueType = fGetRenderType( clueObj );
+            clueObj = new Object();
+            clueObj[ clueType] = clueStr;
+        }
+        clueObj.answer = arrAnswers[i];
+        arrClues[i] = clueObj;
+    }
+}
+
+function fCalcWidths(){
+    answersWidth = (window.document.body.clientWidth - clueWidth - separatorWidth );
+    document.getElementById( "div_clue").style.width = clueWidth + "px";
+    document.getElementById( "div_separator").style.width = separatorWidth + "px";
+    document.getElementById( "div_answers").style.width = answersWidth + "px";
+}
+
+function fCreatelayout(){
+    arrClues = fShuffle( arrClues);
+    fShowClue();
+    fLayoutAnswers();
+}
+
+function fShowClue(){
+   currCluePos = currCluePos == arrClues.length -1 ? 0 : currCluePos + 1;
+   var clueObj = arrClues[ currCluePos];
+   var clueRenderStr = "";
+   // Loop thru the clue properties and render as per each
+   for( var prop in clueObj ){
+       var clue = clueObj[ prop];
+       var clueType = prop;
+       //alert( clue + "," + clueType);
+       if( clueType == "image" ){
+           clueRenderStr += "<div><img src='" + clue + "' width='" +  clueWidth + "px' /></div>";
+       }
+       else if( clueType == "text" ){
+           clueRenderStr += "<div>" + clue + "</div>";
+       }
+       else if( clueType == "sound" ){
+           clueRenderStr += "<div>" + fGetSoundElemHTML( "cluesound", clue, true) + "</div>";
+       }
+   }
+   //alert( clueRenderStr );
+   document.getElementById( "div_clue").innerHTML = clueRenderStr;
+}
+
+function fGetRenderType( pStr){
+    if( pStr.indexOf( ".jp") > 0 || pStr.indexOf( ".png") > 0 || pStr.indexOf( ".gif") > 0) {
+        return "image";
+    }
+    else if( pStr.indexOf( ".mp3") > 0 || pStr.indexOf( ".wav") > 0 ) {
+        return "sound";
+    }
+    else {
+        return "text";
+    }
+}
+
+function fLayoutAnswers(){
+    var answersRenderStr = "<table id='answerstable' >";
+    if( answerAction == "type" ){
+        answersRenderStr += "<td><input style='height:50px;width:400px;font-size:20' type='text' "
+            + " onchange=\"if( fCheckAnswer(this.value) ){ this.value=''; }\" ></input></td>";
+    }
+    else if ( answerAction == "select" ){
+        var currRowStr = "";
+        var colWidth = answersWidth/numAnswerColumns;
+        var dupAnsMap = [];
+        var dummyVal = "X";
+        var ansCnt = 0;
+        for( var i=0; i< arrAnswers.length; i++ ){
+            if( ansCnt % numAnswerColumns == 0){
+                answersRenderStr += "<tr>" + currRowStr + "</tr>";
+                currRowStr = "";
+            }
+            var answer = arrAnswers[i];
+            // In case of duplicate answers, render only once
+            if( dupAnsMap[ answer] != null ){
+                continue;
+            }
+            else {
+                dupAnsMap[ answer] = dummyVal;
+                ansCnt++;
+                
+            }
+            var answerRenderType = fGetRenderType( answer );
+            currRowStr += "<td onclick=\"fCheckAnswer( '" + answer + "')\" style='width:" + colWidth + "px;' "
+                + " onmouseover='fAnswerHover( this, true)' onmouseout='fAnswerHover( this, false)' >";
+            if( answerRenderType == "image" ){
+                currRowStr += "<img src='" + answer + "' />";
+            }
+            else {
+                // text
+                currRowStr += "<font size=" + answerTextFont + " >" + answer + "</font>";
+            }
+            currRowStr += "</td>";
+        }
+        if( currRowStr != "" ){
+            answersRenderStr += "<tr>" + currRowStr + "</tr>";
+        }
+    }
+    answersRenderStr += "</table>";
+    //alert( answersRenderStr );
+    document.getElementById( "div_answers").innerHTML = answersRenderStr;    
+}
+
+function fCheckAnswer( pAnswer){
+    //alert( fGetCurrentClueAnswerId() + "," + pAnswer );
+    // if the clue-index and answer index match, the answer is correct
+    timesPlayed++;
+    var isCorrect = false;
+    if( fGetCurrentClueAnswerId().toLowerCase() == pAnswer.toLowerCase() ){
+        isCorrect = true;
+        // Correct
+        timesCorrect++;
+        if( correctAnswerSound > "" ){
+            fPlaySound( "soundobjcorrect");
+        }
+        if( correctAnswerImage > "" ){
+            fFadeImage( "response_image", correctAnswerImage);
+        }
+        // Show next clue
+        setTimeout( "fShowClue()", 2000 );
+    }
+    else {
+        // Wrong
+        if( wrongAnswerSound > "" ){
+            fPlaySound( "soundobjwrong");
+        }
+        if( wrongAnswerImage > "" ){
+            fFadeImage( "response_image", wrongAnswerImage);
+        }
+    }
+    // update score
+    document.getElementById( "div_totalAns").innerHTML = timesPlayed;
+    document.getElementById( "div_correctAns").innerHTML = timesCorrect;
+    return isCorrect;
+}
+
+function fGetCurrentClueAnswerId(){
+    var clueObj = arrClues[ currCluePos];
+    return clueObj.answer;
+}
+
+// shuffles the elements of the passed array
+// by exchanging a position with a random position
+function fShuffle( pArr ){
+    var lArrSize = pArr.length;
+    for( var i=0; i< lArrSize/2; i++ ){
+        var rnd = Math.floor( Math.random() * lArrSize );
+        var currVal =  pArr[i];
+        pArr[i] = pArr[rnd];
+        pArr[rnd] = currVal;
+    }
+    return pArr;
+}
+
+function fPlaySound( soundobjid) {
+    var thissound = document.getElementById(soundobjid);
+    if( thissound.Play ){
+        thissound.Play();
+    }
+    else if( thissound.play ){
+        thissound.play();
+    }
+    else if( thissound.DoPlay ){
+        thissound.DoPlay();
+    }
+    else {
+        return false;
+    }
+}
+
+function fFadeImage( pImgId, pSrc){
+    var img = document.getElementById( pImgId);
+    img.src = pSrc;
+    img.style.display = "";
+    setTimeout( "document.getElementById( '" + pImgId + "').style.display='none';", 500 );
+}
+
+function fCreateSoundElem( pParentElemId, pElemId, pSoundSrc, pAutoStart ){
+    document.getElementById( pParentElemId ).innerHTML += fGetSoundElemHTML( pElemId, pSoundSrc, pAutoStart);
+}
+
+function fSupportsAudio(){
+    var a = document.createElement('audio');
+    return !!(a.canPlayType && a.canPlayType('audio/mpeg;').replace(/no/, ''));
+}
+
+function fGetSoundElemHTML( pElemId, pSoundSrc, pAutoStart ){
+    if( fSupportsAudio() ){
+        return "<audio id='" + pElemId + "' src='" + pSoundSrc + "' preload='" + pAutoStart + "' autobuffer></audio>";
+    }
+    else {
+        return    "<embed id='" + pElemId + "' src='" + pSoundSrc + "' autostart='" + pAutoStart + 
+            "' width=1 height=1 enablejavascript='true' type='audio/mpeg'/>";
+    }
+}
+
+
+function fAnswerHover( pTd, pOver ){
+    // For some reason "this" is not the td object. hence pass
+    pTd.className = pOver ? "hoverAnswer":"";
+}
+
+</script>
+</head>
+<body onload="fInit()" >
+<table id="mainTable" >
+<tr>
+<th style="font-size:12;font-style:normal">Select from Collection</th>
+<th><select id="sel_pair_groups" onchange="fOnPairGroupChange(this.selectedIndex)"></select></th>
+<th><span id="div_group_info" style="font-size:12;font-style:normal"></span></th>
+</tr>
+<tr><th colspan=3><hr></th></tr>
+<tr>
+<th>Clue</th>
+<th></th>
+<th>Answers</th>
+</tr>
+<tr>
+<td><span id="div_clue" onclick='fShowClue()' /></td>
+<td><span id="div_separator" /><img id="response_image" style="display:none" /></td>
+<td><span id="div_answers" /></td>
+</tr>
+</table>
+<table>
+<tr><td >Score&nbsp;&nbsp;<span id="div_correctAns" ></span>&nbsp;/&nbsp;<span id="div_totalAns" ></span></td></tr>
+</table>
+<div id="response_sounds_div" />
+
+</body>
