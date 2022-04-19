@@ -1,0 +1,421 @@
+﻿<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+<script src="fontmap.js" ></script>
+<script>
+/**
+ * Script that enables text fields to do a phonetic translation from english to devnagari
+ * manoj mokashi, sep 2009
+*/
+var isIE = document.all != null;
+
+// Its easy to have an editable english text-box and a separate readonly devnagari text box,
+// since the english text is always available to parse.
+// To do it with a single field, is more tricky, we need to check the sequence of chrs before the cursor position
+function fnEngToDvg( pEvent) {
+    // First check if conversion is enabled.
+    // If not, simply allow typing in English, as is
+    if( ! fnEngToDvg.convert ){
+        return true;
+    }
+	if( pEvent == null ){
+		pEvent = window.event;
+	}
+	var keyCode = isIE?pEvent.keyCode:pEvent.which;
+	var keyChar = String.fromCharCode( keyCode);
+	var pField = pEvent.target != null?pEvent.target:pEvent.srcElement;
+	log( 'start--------------------------------,keyCode' + keyCode + ":" + keyChar + ',FL:' + pField.value.length );
+	//log( 'FV:' + showSpcChars( pField.value) );
+
+	// Store the caret position from which the current sequence is starting
+	if( pField.started == null || pField.started == false ){
+		initSequence( pField);		
+	}
+
+	// If the current key is not a valid alphabet, assume the prev sequence has ended.
+	// Allow that key to be entered, as is
+	if( ! isMappedChar( keyChar) ){
+		// Complete the current sequence
+		// characters meant to be incomplete, like viraam
+		if( pField.currSeqEng != '' && pField.currSeqEng != 'x' ){
+			pField.currSeqDvg = getCompleteChar( pField.currSeqEng, pField.currSeqDvg);
+			updateField( pField);
+		}
+		endSequence( pField);
+		log( 'returning' + keyCode + keyChar );
+		return true;
+	}
+	
+	
+	var bEndSequence = false;
+	var dvgChar = arrKeyMap[ keyChar ];
+	if( dvgChar == null ){
+		// try the lowercase for temporary display
+		dvgChar = arrKeyMap[ keyChar.toLowerCase() ];
+		// If its still null, use the english character, e.g. dot
+		dvgChar = (dvgChar == null)?keyChar:dvgChar;
+	}
+	
+	try {
+	// If there is no prev sequence, simply add the char as it is
+	if( pField.currSeqEng != "" ) {
+		var  prevChar = pField.currSeqEng.charAt( pField.currSeqEng.length -1);
+		// First always check if the entire sequence has a match
+		var newSeq = pField.currSeqEng + keyChar;
+		var newSeqMatch = arrKeyMap[ newSeq];
+		if( newSeqMatch != null ){
+			pField.currSeqDvg = newSeqMatch;
+		}
+		else {
+			if ( keyChar == '.' ){
+				// Start of chandrabindu. complete the old sequence
+				initSequence( pField);
+			}
+			// Match for entire seq not found
+			if( isVowel( keyChar) ){
+				log( "vowel" );
+				// If this is the first vowel in the sequence, complete the last character
+				// If the prev char is a vowel, the character was already completed that time,
+				if( ! isVowel( prevChar) ){
+					pField.currSeqDvg = getCompleteChar( pField.currSeqEng, pField.currSeqDvg);
+				}
+				else {
+					log( "2vowels" );
+					// try to see if the two vowels together make a sequence
+					var complexMatra = arrMatras[ prevChar + keyChar];
+					if( complexMatra != null ){
+						// if found, add and end the sequence, assume that max length of vowel sequence = 2
+						// initSequence( pField);
+						pField.currSeqEng = prevChar + keyChar;
+						// We had already added a matra, as the prev char was a vowel. now we have a complex matra consisting of the
+						// two together, so remove the last one entered
+						stripLastMatra( pField, prevChar);
+						pField.currSeqDvg += complexMatra;
+						updateField( pField);
+						endSequence( pField);
+						return false;
+					}
+				}
+				// Then add the current letter. Ignore 'a', since it just completes the letter, and that we did above
+				if( keyChar != 'a'  ){
+					// If the prev one was a vowel, this one should render as a complete vowel
+					if( isVowel( prevChar) ){
+						// Assume that we suport sequence of upto 2 vowels only
+						bEndSequence = true;
+					}
+					else {
+						// Prev char is non-vowel, so this  vowel should render as a matra
+						// special case for ru. TODO - can such behaviour be configured in the mapping array  ?
+						if( prevChar == 'r' && keyChar == 'u' && pField.currSeqDvg.length > 1){
+							// remove the halant and r from the previous sequence
+							pField.currSeqDvg = stripLastChars( pField.currSeqDvg, 2);
+							dvgChar = arrMatras[ 'ru'];
+							bEndSequence = true;
+						}
+						else {
+							dvgChar = arrMatras[ keyChar];
+						}
+					}
+					// For rhaswa i, we need to insert it before the previous char
+					// NRU : Not required for Unicode
+					//if( keyChar == "i" ){
+						//pField.currSeqDvg = dvgChar + pField.currSeqDvg;
+					//}
+					//else {
+						pField.currSeqDvg += dvgChar;
+					//}
+				}
+			}
+			else {
+				// If a non-vowel comes after a vowel, the previous sequence should be cleared, and a new sequence restarted
+				if( isVowel( prevChar) ){
+					initSequence( pField);
+				}
+				else if( prevChar == 'r' && ! isVowel(keyChar) && pField.currSeqEng.charAt(0) != '.' ){
+					//  Remove the ra and add the rafaar. Note that .r is rendered differently from a rafaar.
+					// NRU
+					//pField.currSeqDvg = pField.currSeqDvg.substring(1);
+					// exclude the r from the english sequence, and set a flag
+					pField.currSeqEng = pField.currSeqEng.substring(1);
+					pField.rafaar = true;
+				}				
+				var lastTwoDvg = null;
+				if( pField.currSeqEng.length >= 2 ){
+					// Also check if the last 2 chars form a sequence, e.g. sth, tkh etc
+					lastTwoDvg = arrKeyMap[ prevChar + keyChar];
+					if( lastTwoDvg != null ){
+						log( 'lastTwoDvg:' + prevChar + keyChar + "->" + lastTwoDvg);
+						// Remove the prec char+halant, and add the new found sequence
+						pField.currSeqDvg = stripLastChars( pField.currSeqDvg, 2) + lastTwoDvg;
+					}
+				}
+				if ( lastTwoDvg == null ) {
+					// Continue building the sequence, check if it corresponds to something
+					pField.currSeqDvg += dvgChar;
+				}
+			}
+		}// else full match not found
+	}// Seq empty
+	else {
+		// No sequence yet, just use the curr chars
+		pField.currSeqDvg += dvgChar; 
+	}
+	}// try
+	catch( e){
+		// Provided as  a means to jump to the end of processing
+	}
+	// Rafaar
+	// NRU. Handled by the font
+	if( pField.rafaar == true ){
+		// remove the previous matra  and append to the end
+		/*
+		var rafarChar = arrMatras['r'];
+		pField.currSeqDvg = pField.currSeqDvg.replace( rafarChar, '');
+		pField.currSeqDvg += rafarChar;
+		*/
+		// Check that the r at the start has been removed by a complex char, add it again
+		if( pField.currSeqDvg.charAt(0) != arrKeyMap['r'] ){
+			pField.currSeqDvg = arrKeyMap['r'] + arrMatras['x'] + pField.currSeqDvg;
+		}
+	}
+	
+	// If its M, for anuswar, end the sequence
+	if( keyChar == 'M' ){
+		log( "anuswaar");
+		bEndSequence = true;
+	}
+	// Use half forms of non-vowels
+	if( ! isVowel( keyChar) && keyChar != 'M' && keyChar != 'x' && arrSpecialChars[keyChar] == null && ! isNumber(keyChar)  ){
+		// Use viram to indicate half form
+		pField.currSeqDvg += arrMatras['x'];
+	}
+	// update the field with changes
+	updateField( pField );
+	log( "FL:" + pField.value.length );
+	// keep on appending to the english seq
+	pField.currSeqEng += keyChar;
+	log( "seq:" + pField.currSeqEng);
+	if( bEndSequence ){
+		endSequence( pField);
+	}
+	log( 'end--------------------------------');
+	return false;
+}
+// Whether to enable conversion : false:english, true:devnagari
+fnEngToDvg.convert = true;
+
+function endSequence( pField){
+	clearSequence( pField);
+}
+
+function clearSequence( pField){
+	pField.started = false;
+	pField.currSeqEng = "";
+	pField.currSeqDvg = "";
+	pField.currSeqTextBef = "";
+	pField.currSeqTextAft = "";
+	pField.rafaar = false;
+	pField.currSeqStartPos = 0;
+	pField.wrtnSeqDvg = "";
+}
+
+// Initialise values when starting a new sequence
+function initSequence( pField){
+		clearSequence( pField);
+		pField.started = true;
+		var val = pField.value;
+		var caretPos = 0;
+		// we will need cursor position only for FF, for IE we use a different method.
+		if( ! isIE ){
+		    caretPos = fnGetCaretPosition( pField);
+		    pField.currSeqStartPos = caretPos;
+		    pField.currSeqTextBef = val.substring( 0, caretPos);
+    		pField.currSeqTextAft = val.substring( caretPos);
+		}
+		log( "init,caret@" + caretPos + ",txtbef:" + showSpcChars( pField.currSeqTextBef) + ",txtaft:" + showSpcChars( pField.currSeqTextAft) );
+}
+
+// Check if the passed english char is mapped  to a devnagari character
+// dot is allowed as part of a seq, e.g. in bank
+function isMappedChar( pChar){
+	return ( pChar >= 'A' && pChar <= 'z') || isNumber( pChar) || arrSpecialChars[pChar] != null;
+}
+// special characters other than albhabets, that are allowed
+var arrSpecialChars = { '.':"", '$':"", '|':"" };
+
+// Some characters like k, d, etc do not get completed by adding a dand at the end.
+// they have separate forms of half and full character.
+// This funciton handles both the cases.
+function getCompleteChar( pSeqEng, pSeqDvg ){
+	log( "gcc" + pSeqDvg + "," + pSeqDvg.length );
+	// remove the virama at the end, to make the character complete
+	if( pSeqDvg.charAt(pSeqDvg.length-1) == arrMatras['x'] ){
+		pSeqDvg = stripLastChars( pSeqDvg, 1);
+	}
+	log( "gcc,ret:" + pSeqDvg + "," + pSeqDvg.length );
+	return pSeqDvg;
+}
+
+
+// Strip the last matra, e.g. in case of a complex (2 vowels) matra
+// the last matra is to be replaced by the complex matras
+function stripLastMatra( pField, pPrevChar){
+    // If its a, it only completes the character, so don't strip in that case
+	if( arrMatras[ pPrevChar] != null && pPrevChar != 'a' ){
+		log( "slm,rem,seq:" + pField.currSeqDvg );
+		pField.currSeqDvg = stripLastChars( pField.currSeqDvg, 1);
+	}
+}
+
+// remove the last n chars
+function stripLastChars( pStr, pNum){
+	return pStr.substr(0, pStr.length-pNum);
+}
+  
+
+// Update the field with the current devnagari sequence. The cursor position should be retained.
+function updateField( pField){
+	if( document.selection ){
+		// IE
+		var sel = document.selection.createRange();
+		// Start moved to 0 pos, End remains at cursor pos
+		var cursorPos = pField.wrtnSeqDvg.length;
+		log( 'movestart:' + cursorPos);
+		// Move start to 0 pos, end remains at cursor pos. If there were an easy method to move start to 0 pos, we would avoid much complication.
+		sel.moveStart ('character', -cursorPos );
+		log( 'updFld, start:' + pField.currSeqStartPos + ',sellen:' + sel.text.length + ',FL;' + pField.value.length );
+		log( 'seqwrtn:' + pField.wrtnSeqDvg + ',seqdvg:' +  pField.currSeqDvg );
+		sel.text = pField.currSeqDvg;
+	}
+	else {
+		// FF
+		pField.value = pField.currSeqTextBef + pField.currSeqDvg + pField.currSeqTextAft;
+		pField.selectionStart = (pField.currSeqTextBef + pField.currSeqDvg).length;
+		pField.selectionEnd = pField.selectionStart;
+	}
+	log( 'updFld, end,FL;' + pField.value.length );
+	// Save the seq that has been writen so far. Used for cursor position
+	pField.wrtnSeqDvg = pField.currSeqDvg;
+}
+
+// on key up does not fire ALERTS for keys that are trapped by onkepress ? Some odd behaviour
+// ALERTS for keys like shift/backspace etc which are non-displayable-chars are trapped
+function fnOtherKeys( pEvent){
+	// Check if the event has already been handled, if yes return false;
+	if( pEvent == null ){
+		pEvent = window.event;
+	}
+	var keyCode = isIE?pEvent.keyCode:pEvent.which;
+	var keyChar = String.fromCharCode( keyCode);
+	log( 'fnOtherKeys' + keyCode + ":" + keyChar);
+	var pField = pEvent.target != null?pEvent.target:pEvent.srcElement;
+	// If the current key is not a valid alphabet, or dot, or the shift/ctrl keys, assume the prev sequence has ended.
+	// Allow that key to be entered
+	if( keyCode != 16 && keyCode != 17 && keyCode != 190 && ! isMappedChar(keyChar) ){
+		// clear the sequence
+		endSequence( pField);
+		// Check for change in language
+		if( keyCode == 145 ){ // ScrollLock
+		    fnEngToDvg.convert = ! fnEngToDvg.convert;
+	    }
+		log( 'returning' + keyCode );
+		return true;
+	}
+}
+
+
+function isVowel( pChar){
+	return vowelsArr[ pChar.toLowerCase() ] != null;
+}
+
+function isNumber( pChar){
+	return ( pChar >= '0' && pChar <= '9');
+}
+
+// Get the position of the caret from the start of the control
+function fnGetCaretPosition ( pField) {
+	var caretPos = 0;
+	// IE 
+	if (document.selection) {
+		pField.focus ();
+		var sel = document.selection.createRange();
+		// Move start to 0 pos, end remains at cursor, thus selection length = cursor pos
+		sel.moveStart ('character', -pField.value.length);
+		caretPos = sel.text.length;
+		log( 'caretpos:' + caretPos );
+	}
+	// Firefox
+	else if (pField.selectionStart || pField.selectionStart == '0') {
+		caretPos = pField.selectionStart;
+		log( 'ffgcp:' + caretPos );
+	}
+	return caretPos;
+}
+
+
+function isTextArea( pField){
+	return pField.tagName.toLowerCase() == 'textarea';
+}
+
+// Show normally unprintable chars like newlines, carriage returns
+function showSpcChars( pStr){
+	return pStr.replace( /[\r]/g, '\\r').replace( /[\n]/g, '\\n');
+}
+
+function escapeHTML( pStr){
+	return pStr.replace( /</g, '&lt;').replace( />/g, '&gt;').replace( /"/g, '&quot;');
+} 
+
+function log( pMsg){
+	if( window.log.enabled ){
+    	if( window.log.logSpan == null ){
+        	window.log.logSpan = document.getElementById("logMsg");
+        }
+        var logSpan = window.log.logSpan;
+		//alert( pMsg);
+		logSpan.innerHTML = pMsg + "<br>" + logSpan.innerHTML;
+	}
+}
+window.log.enabled = false;
+window.log.logSpan = null;
+
+function fnShowMappings(){
+	var mappingsSpan = document.getElementById("mappingsSpan");
+	mappingsSpan.innerHTML = fnObjectAsString( arrKeyMap, " ,&nbsp;", 10, "<br>" ) + "<br>" 
+		+ fnObjectAsString( arrMatras, " ,&nbsp;", 10, "<br>" );
+}
+
+function fnObjectAsString( pObj, pSep, pRowSize, pRowSep){
+	var strObj = "";
+    // loop thru the properties of an object
+	var loopCnt = 0;
+	for( var prop in pObj ){
+		loopCnt++;
+		strObj += prop + ":" + pObj[prop] + pSep + (loopCnt % pRowSize == 0?pRowSep:'' );
+	}
+	return strObj;
+}
+
+
+var vowelsArr = { "a":"", "e":"", "i":"", "o":"", "u":"" };
+</script>
+
+</head>
+<body>
+<h2>Javascript to type in Devnagari, using Unicode fonts</h2>
+<h4>You need to have a Unicode font on your PC. You can download the "JanaMarathi" Unicode font from CDAC 
+<a href='http://tdil.mit.gov.in/download/janamarathi.htm'>here</a>
+</h4>
+<h5>Use SCROLL key to toggle language</h5>
+<input name="txt" id="txtinp" type="text" size="80" style="font-family:JanaMarathi;font-size:20;" onkeyup="fnOtherKeys( event)" onkeypress="return fnEngToDvg( event)" onblur="endSequence( this)" value="" >
+<input type="button" value="Google Search" onclick="window.open( 'http://www.google.co.in/search?q=' + encodeURI( document.getElementById( 'txtinp').value) + '&ie=UTF-8&oe=UTF-8' )" />
+<textarea name="txt"  style="font-family:JanaMarathi;font-size:20;" onkeyup="fnOtherKeys( event)" onkeypress="return fnEngToDvg( event)" rows="8" cols="80">
+</textarea>
+<br>
+<input type="button" value="Show Mappings" onclick="fnShowMappings()" > 
+<br>
+<span id="mappingsSpan" style="background-color:gray;font-weight:bold;font-family:JanaMarathi;font-size:20;" ></span>
+<br>
+<span id="logMsg" ></span>
+</body>
+</html>
